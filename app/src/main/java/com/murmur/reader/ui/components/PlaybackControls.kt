@@ -1,0 +1,115 @@
+package com.murmur.reader.ui.components
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.murmur.reader.R
+import com.murmur.reader.tts.TtsState
+
+@Composable
+fun PlaybackControls(
+    state: TtsState,
+    onPlay: () -> Unit,
+    onPause: () -> Unit,
+    onStop: () -> Unit,
+    onSkipNext: () -> Unit,
+    onSkipPrev: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        tonalElevation = 4.dp,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // State label
+            val stateLabel = when (state) {
+                is TtsState.Idle -> stringResource(R.string.state_idle)
+                is TtsState.Connecting -> stringResource(R.string.state_connecting)
+                is TtsState.Synthesizing -> stringResource(
+                    R.string.state_synthesizing,
+                    state.chunkIndex + 1,
+                    state.totalChunks
+                )
+                is TtsState.Playing -> stringResource(R.string.state_playing)
+                is TtsState.Paused -> stringResource(R.string.state_paused)
+                is TtsState.Error -> stringResource(R.string.state_error, state.message)
+            }
+            Text(
+                text = stateLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Skip back
+                IconButton(onClick = onSkipPrev) {
+                    Icon(
+                        Icons.Filled.SkipPrevious,
+                        contentDescription = stringResource(R.string.action_skip_prev),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                // Stop
+                IconButton(onClick = onStop) {
+                    Icon(
+                        Icons.Filled.Stop,
+                        contentDescription = stringResource(R.string.action_stop),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                // Play / Pause (main button)
+                FilledIconButton(
+                    onClick = if (state is TtsState.Playing) onPause else onPlay,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        imageVector = if (state is TtsState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (state is TtsState.Playing)
+                            stringResource(R.string.action_pause)
+                        else
+                            stringResource(R.string.action_play),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                // Skip forward
+                IconButton(onClick = onSkipNext) {
+                    Icon(
+                        Icons.Filled.SkipNext,
+                        contentDescription = stringResource(R.string.action_skip_next),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
+    }
+}

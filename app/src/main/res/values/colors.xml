@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="murmur_dark_bg">#FF0F0F0F</color>
+    <color name="murmur_primary">#FF8BBCFF</color>
+    <color name="murmur_highlight">#FFFFD54F</color>
+</resources>
