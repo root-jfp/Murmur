@@ -47,6 +47,23 @@
     <string name="continue_reading">Continue Reading</string>
     <string name="recent_books">Recent Books</string>
 
+    <!-- Bookmarks -->
+    <string name="action_bookmark">Bookmark this page</string>
+    <string name="action_remove_bookmark">Remove bookmark</string>
+    <string name="action_bookmarks_list">Bookmarks</string>
+    <string name="bookmark_page">Page %1$d</string>
+    <string name="bookmarks_dialog_title">Bookmarks</string>
+    <string name="action_delete_bookmark">Delete bookmark</string>
+
+    <!-- Search -->
+    <string name="action_search">Search in document</string>
+    <string name="hint_search">Search\u2026</string>
+    <string name="search_no_matches">No matches</string>
+    <string name="search_match_count">%1$d of %2$d</string>
+    <string name="action_prev_match">Previous match</string>
+    <string name="action_next_match">Next match</string>
+    <string name="action_close_search">Close search</string>
+
     <!-- Settings -->
     <string name="settings_section_display">Display</string>
     <string name="settings_section_reading">Reading</string>
@@ -56,4 +73,27 @@
     <string name="setting_serif_font">Serif font (Noto Serif)</string>
     <string name="setting_font_size">Font size</string>
     <string name="settings_about_text">Murmur reads documents and text aloud using Microsoft Edge\'s neural TTS voices. Personal use only.</string>
+
+    <!-- Theme modes -->
+    <string name="setting_theme">Theme</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_sepia">Sepia</string>
+    <string name="theme_high_contrast">High Contrast</string>
+
+    <!-- Font families -->
+    <string name="setting_font_family">Font</string>
+    <string name="font_serif">Serif</string>
+    <string name="font_sans_serif">Sans Serif</string>
+    <string name="font_monospace">Monospace</string>
+    <string name="font_cursive">Cursive</string>
+
+    <!-- URL -->
+    <string name="action_open_url">Open URL</string>
+    <string name="url_dialog_title">Open Web Page</string>
+    <string name="hint_url">Paste URL here\u2026</string>
+    <string name="action_open">Open</string>
+
+    <!-- WiFi -->
+    <string name="action_retry_connection">Retry connection</string>
 </resources>

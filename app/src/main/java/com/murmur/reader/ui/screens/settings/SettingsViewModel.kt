@@ -23,4 +23,6 @@ class SettingsViewModel @Inject constructor(
     fun setFontSize(sp: Float) = viewModelScope.launch { prefsRepository.setFontSize(sp) }
     fun setKeepScreenOn(keep: Boolean) = viewModelScope.launch { prefsRepository.setKeepScreenOn(keep) }
     fun setSerifFont(serif: Boolean) = viewModelScope.launch { prefsRepository.setSerifFont(serif) }
+    fun setThemeMode(mode: String) = viewModelScope.launch { prefsRepository.setThemeMode(mode) }
+    fun setFontFamily(family: String) = viewModelScope.launch { prefsRepository.setFontFamily(family) }
 }

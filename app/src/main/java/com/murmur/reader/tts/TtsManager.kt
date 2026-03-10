@@ -489,6 +489,62 @@ class TtsManager @Inject constructor(
         }
     }
 
+    /**
+     * Plays a short voice sample for preview in the voice selector.
+     * Stops any current playback.
+     */
+    fun previewVoice(voiceName: String) {
+        stopInternal()
+        currentJob = scope.launch {
+            val sampleText = if (voiceName.startsWith("pt-")) {
+                "Olá, esta é uma pré-visualização da minha voz."
+            } else {
+                "Hello, this is a preview of my voice."
+            }
+            val curRate = rate
+            val curPitch = pitch
+
+            if (!networkUtil.isNetworkAvailable()) {
+                _isOfflineMode.value = true
+                return@launch
+            }
+
+            _isOfflineMode.value = false
+            _state.value = TtsState.Synthesizing(0, 1)
+            audioPlayer.prepareForChunk()
+
+            var hadError = false
+            val request = SynthesisRequest(
+                text = sampleText,
+                voiceName = voiceName,
+                rate = curRate,
+                pitch = curPitch,
+            )
+
+            edgeTtsClient.synthesize(request).collect { event ->
+                when (event) {
+                    is EdgeTtsClient.SynthesisEvent.AudioChunkReceived ->
+                        audioPlayer.appendChunk(event.chunk)
+                    is EdgeTtsClient.SynthesisEvent.WordBoundary -> {}
+                    is EdgeTtsClient.SynthesisEvent.TurnEnd -> {}
+                    is EdgeTtsClient.SynthesisEvent.Error -> {
+                        _state.value = TtsState.Error(event.message)
+                        hadError = true
+                    }
+                }
+            }
+
+            if (hadError) return@launch
+
+            val started = audioPlayer.playBuffer()
+            if (started) {
+                _state.value = TtsState.Playing
+                audioPlayer.awaitCompletion()
+            }
+            _state.value = TtsState.Idle
+        }
+    }
+
     fun pause() {
         audioPlayer.pause()
         androidTts?.stop()

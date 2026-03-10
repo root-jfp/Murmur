@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,7 +27,9 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
@@ -42,12 +45,21 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.murmur.reader.data.preferences.FontFamilyOption
+import com.murmur.reader.data.preferences.ThemeMode
 import com.murmur.reader.ui.theme.BookPageDark
+import com.murmur.reader.ui.theme.BookPageHighContrast
 import com.murmur.reader.ui.theme.BookPageLight
+import com.murmur.reader.ui.theme.BookPageSepia
 import com.murmur.reader.ui.theme.BookTextDark
+import com.murmur.reader.ui.theme.BookTextHighContrast
 import com.murmur.reader.ui.theme.BookTextLight
+import com.murmur.reader.ui.theme.BookTextSepia
 import com.murmur.reader.ui.theme.MurmurHighlight
 import com.murmur.reader.ui.theme.MurmurHighlightOnDark
+import com.murmur.reader.ui.theme.MurmurTapFlash
+import com.murmur.reader.ui.theme.MurmurTapFlashOnDark
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val PAGE_MARGIN_DP = 10
@@ -157,20 +169,42 @@ fun BookPager(
     text: String,
     highlightedWordIndex: Int,
     fontSize: TextUnit,
-    useSerifFont: Boolean,
-    isDark: Boolean,
+    fontFamilyOption: String = FontFamilyOption.SERIF,
+    themeMode: String = ThemeMode.DARK,
     initialPage: Int,
     onPageChange: (page: Int, total: Int) -> Unit,
     onWordTapped: (globalWordIndex: Int) -> Unit = {},
+    targetPage: Int = -1,
+    onNavigationConsumed: () -> Unit = {},
+    searchMatchWordIndices: List<Int> = emptyList(),
+    currentSearchMatchWordIndex: Int = -1,
+    onPagesComputed: (List<Int>) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val textMeasurer = rememberTextMeasurer()
 
-    val backgroundColor = if (isDark) BookPageDark else BookPageLight
-    val textColor = if (isDark) BookTextDark else BookTextLight
-    val fontFamily = if (useSerifFont) FontFamily.Serif else FontFamily.SansSerif
+    val isDark = themeMode == ThemeMode.DARK || themeMode == ThemeMode.HIGH_CONTRAST
+    val backgroundColor = when (themeMode) {
+        ThemeMode.SEPIA -> BookPageSepia
+        ThemeMode.HIGH_CONTRAST -> BookPageHighContrast
+        ThemeMode.DARK -> BookPageDark
+        else -> BookPageLight
+    }
+    val textColor = when (themeMode) {
+        ThemeMode.SEPIA -> BookTextSepia
+        ThemeMode.HIGH_CONTRAST -> BookTextHighContrast
+        ThemeMode.DARK -> BookTextDark
+        else -> BookTextLight
+    }
+    val fontFamily = when (fontFamilyOption) {
+        FontFamilyOption.SANS_SERIF -> FontFamily.SansSerif
+        FontFamilyOption.MONOSPACE -> FontFamily.Monospace
+        FontFamilyOption.CURSIVE -> FontFamily.Cursive
+        else -> FontFamily.Serif
+    }
     val highlightColor = if (isDark) MurmurHighlightOnDark else MurmurHighlight
+    val tapFlashColor = if (isDark) MurmurTapFlashOnDark else MurmurTapFlash
 
     Box(modifier = modifier.background(backgroundColor)) {
         // BoxWithConstraints is needed to get the pixel size for TextMeasurer
@@ -195,7 +229,7 @@ fun BookPager(
                 textIndent = TextIndent(firstLine = 24.sp),
             )
 
-            val pages = remember(text, fontSize.value, contentWidthPx, contentHeightPx, useSerifFont) {
+            val pages = remember(text, fontSize.value, contentWidthPx, contentHeightPx, fontFamilyOption) {
                 buildBookPages(textMeasurer, text, textStyle, contentWidthPx, contentHeightPx)
             }
 
@@ -204,6 +238,11 @@ fun BookPager(
                 initialPage = initialPage.coerceIn(0, totalPages - 1),
                 pageCount = { totalPages },
             )
+
+            // Report page start word indices for search navigation
+            LaunchedEffect(pages) {
+                onPagesComputed(pages.map { it.startWordCount })
+            }
 
             // Notify caller of total pages on first composition
             LaunchedEffect(totalPages) {
@@ -225,6 +264,14 @@ fun BookPager(
                 onPageChange(pagerState.currentPage, totalPages)
             }
 
+            // Navigate to a specific page when targetPage is set
+            LaunchedEffect(targetPage) {
+                if (targetPage in 0..pages.lastIndex && targetPage != pagerState.currentPage) {
+                    pagerState.animateScrollToPage(targetPage)
+                }
+                if (targetPage >= 0) onNavigationConsumed()
+            }
+
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -233,16 +280,29 @@ fun BookPager(
                 val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
                 val localWordIndex = highlightedWordIndex - page.startWordCount
 
+                // Compute per-page search match info
+                val nextPageStart = pages.getOrNull(pageIndex + 1)?.startWordCount ?: Int.MAX_VALUE
+                val pageSearchMatches = searchMatchWordIndices
+                    .filter { it >= page.startWordCount && it < nextPageStart }
+                    .map { it - page.startWordCount }
+                    .toSet()
+                val activeMatchLocal = if (currentSearchMatchWordIndex >= page.startWordCount &&
+                    currentSearchMatchWordIndex < nextPageStart
+                ) currentSearchMatchWordIndex - page.startWordCount else -1
+
                 BookPage(
                     page = page,
                     localWordIndex = localWordIndex,
                     textStyle = textStyle,
                     highlightColor = highlightColor,
+                    tapFlashColor = tapFlashColor,
                     backgroundColor = backgroundColor,
                     isDark = isDark,
                     pageIndex = pageIndex,
                     totalPages = totalPages,
                     marginDp = PAGE_MARGIN_DP.dp,
+                    searchMatchLocalWordIndices = pageSearchMatches,
+                    currentSearchMatchLocalWordIndex = activeMatchLocal,
                     onTapLeft = {
                         scope.launch {
                             if (pagerState.currentPage > 0)
@@ -268,11 +328,14 @@ private fun BookPage(
     localWordIndex: Int,
     textStyle: TextStyle,
     highlightColor: Color,
+    tapFlashColor: Color,
     backgroundColor: Color,
     isDark: Boolean,
     pageIndex: Int,
     totalPages: Int,
     marginDp: Dp,
+    searchMatchLocalWordIndices: Set<Int> = emptySet(),
+    currentSearchMatchLocalWordIndex: Int = -1,
     onTapLeft: () -> Unit,
     onTapRight: () -> Unit,
     onWordTapped: (globalWordIndex: Int) -> Unit = {},
@@ -319,6 +382,9 @@ private fun BookPage(
                 startWordCount = page.startWordCount,
                 textStyle = textStyle,
                 highlightColor = highlightColor,
+                tapFlashColor = tapFlashColor,
+                searchMatchLocalWordIndices = searchMatchLocalWordIndices,
+                currentSearchMatchLocalWordIndex = currentSearchMatchLocalWordIndex,
                 onWordTapped = onWordTapped,
                 onTapLeft = onTapLeft,
                 onTapRight = onTapRight,
@@ -346,6 +412,9 @@ private fun PageText(
     startWordCount: Int,
     textStyle: TextStyle,
     highlightColor: Color,
+    tapFlashColor: Color,
+    searchMatchLocalWordIndices: Set<Int> = emptySet(),
+    currentSearchMatchLocalWordIndex: Int = -1,
     onWordTapped: (globalWordIndex: Int) -> Unit,
     onTapLeft: () -> Unit,
     onTapRight: () -> Unit,
@@ -353,18 +422,46 @@ private fun PageText(
 ) {
     val tokens = remember(text) { text.split(Regex("(?<=\\s)|(?=\\s)")) }
     var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val haptic = LocalHapticFeedback.current
+
+    // Tap flash state — tapSerial ensures LaunchedEffect restarts even for same word
+    var tappedLocalWordIndex by remember { mutableStateOf(-1) }
+    var tapSerial by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(tapSerial) {
+        if (tappedLocalWordIndex >= 0) {
+            delay(200)
+            tappedLocalWordIndex = -1
+        }
+    }
+
+    val activeSearchColor = Color(0xFFFF8A65)   // orange
+    val inactiveSearchColor = Color(0x55FFCC80)  // light orange, semi-transparent
 
     var wordIdx = 0
     val annotated = buildAnnotatedString {
         tokens.forEach { token ->
             val isSpace = token.isBlank()
             val isHighlighted = !isSpace && localWordIndex >= 0 && wordIdx == localWordIndex
-            if (isHighlighted) {
-                withStyle(SpanStyle(background = highlightColor, color = Color.Black)) {
+            val isTapped = !isSpace && tappedLocalWordIndex >= 0 && wordIdx == tappedLocalWordIndex
+            val isActiveSearch = !isSpace && wordIdx == currentSearchMatchLocalWordIndex
+            val isInactiveSearch = !isSpace && wordIdx in searchMatchLocalWordIndices && !isActiveSearch
+
+            // Priority: TTS highlight > tap flash > active search > inactive search > normal
+            when {
+                isHighlighted -> withStyle(SpanStyle(background = highlightColor, color = Color.Black)) {
                     append(token)
                 }
-            } else {
-                withStyle(SpanStyle(color = textStyle.color)) {
+                isTapped -> withStyle(SpanStyle(background = tapFlashColor, color = textStyle.color)) {
+                    append(token)
+                }
+                isActiveSearch -> withStyle(SpanStyle(background = activeSearchColor, color = Color.Black)) {
+                    append(token)
+                }
+                isInactiveSearch -> withStyle(SpanStyle(background = inactiveSearchColor, color = textStyle.color)) {
+                    append(token)
+                }
+                else -> withStyle(SpanStyle(color = textStyle.color)) {
                     append(token)
                 }
             }
@@ -406,6 +503,9 @@ private fun PageText(
                     if (charOffset in charPos until tokenEnd) {
                         if (isSpace) break // tapped whitespace → page turn
                         up.consume()
+                        tappedLocalWordIndex = wIdx
+                        tapSerial++
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onWordTapped(startWordCount + wIdx)
                         tappedWord = true
                         break
@@ -416,8 +516,13 @@ private fun PageText(
 
                 if (!tappedWord) {
                     val third = size.width / 3f
-                    if (tapOffset.x < third) onTapLeft()
-                    else if (tapOffset.x > third * 2) onTapRight()
+                    if (tapOffset.x < third) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onTapLeft()
+                    } else if (tapOffset.x > third * 2) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onTapRight()
+                    }
                 }
             }
         },

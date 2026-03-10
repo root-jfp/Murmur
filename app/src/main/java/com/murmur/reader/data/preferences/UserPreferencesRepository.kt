@@ -16,14 +16,32 @@ import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "murmur_prefs")
 
+/** Theme mode choices for the reading surface. */
+object ThemeMode {
+    const val LIGHT = "light"
+    const val DARK = "dark"
+    const val SEPIA = "sepia"
+    const val HIGH_CONTRAST = "high_contrast"
+}
+
+/** Font family choices. */
+object FontFamilyOption {
+    const val SERIF = "serif"
+    const val SANS_SERIF = "sans_serif"
+    const val MONOSPACE = "monospace"
+    const val CURSIVE = "cursive"
+}
+
 data class UserPreferences(
     val voiceName: String = "en-US-AriaNeural",
     val ratePercent: Float = 0f,        // -100 to +200, maps to rate string "+0%"
     val pitchHz: Float = 0f,            // -100 to +100, maps to pitch string "+0Hz"
     val fontSize: Float = 18f,          // sp
-    val useDarkTheme: Boolean = true,
+    val useDarkTheme: Boolean = true,   // kept for backward compat; overridden by themeMode
     val keepScreenOn: Boolean = true,
-    val useSerifFont: Boolean = true,   // Noto Serif vs sans-serif
+    val useSerifFont: Boolean = true,   // kept for backward compat; overridden by fontFamily
+    val themeMode: String = ThemeMode.DARK,
+    val fontFamily: String = FontFamilyOption.SERIF,
 )
 
 @Singleton
@@ -40,17 +58,28 @@ class UserPreferencesRepository @Inject constructor(
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val SERIF_FONT = booleanPreferencesKey("serif_font")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val FONT_FAMILY = stringPreferencesKey("font_family")
     }
 
     val preferences: Flow<UserPreferences> = dataStore.data.map { prefs ->
+        // Backward compat: if themeMode not set, derive from useDarkTheme
+        val legacyDark = prefs[Keys.DARK_THEME] ?: true
+        val themeMode = prefs[Keys.THEME_MODE] ?: if (legacyDark) ThemeMode.DARK else ThemeMode.LIGHT
+        // Backward compat: if fontFamily not set, derive from useSerifFont
+        val legacySerif = prefs[Keys.SERIF_FONT] ?: true
+        val fontFamily = prefs[Keys.FONT_FAMILY] ?: if (legacySerif) FontFamilyOption.SERIF else FontFamilyOption.SANS_SERIF
+
         UserPreferences(
             voiceName = prefs[Keys.VOICE_NAME] ?: "en-US-AriaNeural",
             ratePercent = prefs[Keys.RATE_PERCENT] ?: 0f,
             pitchHz = prefs[Keys.PITCH_HZ] ?: 0f,
             fontSize = prefs[Keys.FONT_SIZE] ?: 18f,
-            useDarkTheme = prefs[Keys.DARK_THEME] ?: true,
+            useDarkTheme = themeMode == ThemeMode.DARK || themeMode == ThemeMode.HIGH_CONTRAST,
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: true,
-            useSerifFont = prefs[Keys.SERIF_FONT] ?: true,
+            useSerifFont = fontFamily == FontFamilyOption.SERIF,
+            themeMode = themeMode,
+            fontFamily = fontFamily,
         )
     }
 
@@ -80,6 +109,22 @@ class UserPreferencesRepository @Inject constructor(
 
     suspend fun setSerifFont(serif: Boolean) {
         dataStore.edit { it[Keys.SERIF_FONT] = serif }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        dataStore.edit {
+            it[Keys.THEME_MODE] = mode
+            // Keep legacy key in sync
+            it[Keys.DARK_THEME] = mode == ThemeMode.DARK || mode == ThemeMode.HIGH_CONTRAST
+        }
+    }
+
+    suspend fun setFontFamily(family: String) {
+        dataStore.edit {
+            it[Keys.FONT_FAMILY] = family
+            // Keep legacy key in sync
+            it[Keys.SERIF_FONT] = family == FontFamilyOption.SERIF
+        }
     }
 
     /** Converts stored ratePercent (-100..200) to SSML rate string (+0%, +50%, etc.) */

@@ -14,6 +14,8 @@ val MurmurDarkOnBackground = Color(0xFFE8E8E8)
 val MurmurDarkOnSurface = Color(0xFFE2E2E2)
 val MurmurHighlight = Color(0xFFFFD54F)        // Word highlight colour
 val MurmurHighlightOnDark = Color(0xFFFF9800)  // Orange-ish for dark background
+val MurmurTapFlash = Color(0x5591C8FF)         // Semi-transparent blue tap flash (light)
+val MurmurTapFlashOnDark = Color(0x558BBCFF)   // Semi-transparent blue tap flash (dark)
 
 // Light theme
 val MurmurLightBackground = Color(0xFFFAFAFA)
@@ -30,3 +32,13 @@ val BookPageLight  = Color(0xFFFFF8F0)   // warm off-white paper
 val BookTextLight  = Color(0xFF2C2318)   // warm dark ink
 val BookPageDark   = Color(0xFF1C1B1F)   // soft dark e-reader background
 val BookTextDark   = Color(0xFFD4C5A9)   // warm sepia text
+
+// Sepia theme — classic warm reading
+val BookPageSepia  = Color(0xFFF5E6C8)   // aged parchment
+val BookTextSepia  = Color(0xFF5B4636)   // rich brown ink
+val MurmurSepiaPrimary = Color(0xFF8B6914) // warm gold accent
+
+// High contrast theme — accessibility
+val BookPageHighContrast  = Color(0xFF000000)  // pure black
+val BookTextHighContrast  = Color(0xFFFFFFFF)  // pure white
+val MurmurHighContrastPrimary = Color(0xFF00FF41) // vivid green accent

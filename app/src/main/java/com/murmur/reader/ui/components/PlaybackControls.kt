@@ -1,5 +1,6 @@
 package com.murmur.reader.ui.components
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,12 +20,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.murmur.reader.R
 import com.murmur.reader.tts.TtsState
+import kotlin.math.roundToInt
 
 @Composable
 fun PlaybackControls(
@@ -35,8 +43,15 @@ fun PlaybackControls(
     onSkipNext: () -> Unit,
     onSkipPrev: () -> Unit,
     modifier: Modifier = Modifier,
+    ratePercent: Float = 0f,
+    onRateChange: ((Float) -> Unit)? = null,
     leadingAction: @Composable (() -> Unit)? = null,
 ) {
+    // Track whether the user is currently dragging to change speed
+    var isDragging by remember { mutableStateOf(false) }
+    var dragRate by remember { mutableStateOf(ratePercent) }
+    val density = LocalDensity.current
+
     Surface(
         tonalElevation = 4.dp,
         modifier = modifier.fillMaxWidth()
@@ -63,11 +78,47 @@ fun PlaybackControls(
                 leadingAction()
             }
 
+            val displayText = if (isDragging) {
+                val factor = 1.0 + (dragRate.roundToInt() / 100.0)
+                "Speed: ${"%.1fx".format(factor)}"
+            } else {
+                stateLabel
+            }
+
+            val labelModifier = Modifier
+                .weight(1f)
+                .padding(start = if (leadingAction != null) 0.dp else 8.dp)
+                .let { mod ->
+                    if (onRateChange != null) {
+                        mod.pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    isDragging = true
+                                    dragRate = ratePercent
+                                },
+                                onDragEnd = {
+                                    isDragging = false
+                                },
+                                onDragCancel = {
+                                    isDragging = false
+                                },
+                                onHorizontalDrag = { _, dragAmount ->
+                                    // Convert px to dp, then map: 1dp ≈ 0.5% rate change
+                                    val dpDelta = with(density) { dragAmount.toDp().value }
+                                    dragRate = (dragRate + dpDelta * 0.5f).coerceIn(-50f, 200f)
+                                    onRateChange(dragRate)
+                                },
+                            )
+                        }
+                    } else mod
+                }
+
             Text(
-                text = stateLabel,
+                text = displayText,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f).padding(start = if (leadingAction != null) 0.dp else 8.dp),
+                color = if (isDragging) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = labelModifier,
             )
 
             // Skip back

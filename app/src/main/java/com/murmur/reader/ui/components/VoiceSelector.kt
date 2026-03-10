@@ -13,12 +13,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Female
 import androidx.compose.material.icons.filled.Male
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -44,6 +46,7 @@ fun VoiceSelectorDialog(
     selectedVoiceName: String,
     isLoading: Boolean,
     onVoiceSelected: (EdgeVoice) -> Unit,
+    onPreviewVoice: (EdgeVoice) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -134,7 +137,8 @@ fun VoiceSelectorDialog(
                             onClick = {
                                 onVoiceSelected(voice)
                                 onDismiss()
-                            }
+                            },
+                            onPreview = { onPreviewVoice(voice) },
                         )
                         HorizontalDivider()
                     }
@@ -154,6 +158,7 @@ private fun VoiceListItem(
     voice: EdgeVoice,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onPreview: () -> Unit,
 ) {
     val isFemale = voice.gender.equals("Female", ignoreCase = true)
     val genderIcon = if (isFemale) Icons.Filled.Female else Icons.Filled.Male
@@ -182,12 +187,20 @@ private fun VoiceListItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        IconButton(onClick = onPreview, modifier = Modifier.size(36.dp)) {
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = "Preview voice",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
         Icon(
             imageVector = genderIcon,
             contentDescription = voice.gender,
             tint = genderTint,
             modifier = Modifier
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 4.dp)
                 .size(20.dp)
         )
         if (isSelected) {
