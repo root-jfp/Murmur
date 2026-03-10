@@ -4,8 +4,36 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Simple "M" lettermark for Murmur -->
+
+    <!-- Open book: left page -->
     <path
         android:fillColor="#FF8BBCFF"
-        android:pathData="M20,80 L20,28 L38,28 L54,58 L70,28 L88,28 L88,80 L74,80 L74,52 L58,80 L50,80 L34,52 L34,80 Z" />
+        android:pathData="M41,28 Q31,26 22,33 L22,78 L41,78 Z" />
+
+    <!-- Open book: right page (lighter for depth) -->
+    <path
+        android:fillColor="#FFB0D4FF"
+        android:pathData="M45,28 Q55,26 64,33 L64,78 L45,78 Z" />
+
+    <!-- Spine -->
+    <path
+        android:fillColor="#FF4D7DAF"
+        android:pathData="M41,28 L45,28 L45,78 L41,78 Z" />
+
+    <!-- Sound wave 1 (inner) -->
+    <path
+        android:pathData="M70,40 C78,47 78,61 70,68"
+        android:strokeColor="#FF8BBCFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Sound wave 2 (outer, faded) -->
+    <path
+        android:pathData="M76,33 C86,42 86,66 76,75"
+        android:strokeColor="#FF8BBCFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.5"
+        android:fillColor="#00000000" />
 </vector>

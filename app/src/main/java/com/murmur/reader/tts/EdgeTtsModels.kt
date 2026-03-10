@@ -20,6 +20,7 @@ data class EdgeVoice(
 
 // ─── Word Boundary (from audio.metadata) ────────────────────────────────────
 
+@Serializable
 data class WordBoundary(
     /** Time offset from audio start, in milliseconds */
     val offsetMs: Long,

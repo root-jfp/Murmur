@@ -13,6 +13,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -38,6 +41,9 @@ fun MurmurNavGraph(
     sharedUri: Any? = null
 ) {
     val navController = rememberNavController()
+
+    // URI selected from library — will be passed to ReaderScreen on next navigation
+    var pendingDocumentUri by remember { mutableStateOf<Uri?>(null) }
 
     val items = listOf(
         Triple(Screen.Reader, Icons.Filled.Home, R.string.nav_reader),
@@ -75,15 +81,26 @@ fun MurmurNavGraph(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Reader.route) {
+                // Priority: pending document from library > shared content from intent
+                val documentUri = pendingDocumentUri ?: sharedUri as? Uri
+                val documentText = if (pendingDocumentUri == null) sharedText else null
+
                 ReaderScreen(
-                    initialText = sharedText,
-                    initialUri = sharedUri as? Uri
+                    initialText = documentText,
+                    initialUri = documentUri,
                 )
             }
             composable(Screen.Library.route) {
                 LibraryScreen(
                     onDocumentSelected = { uri ->
-                        navController.navigate(Screen.Reader.route)
+                        pendingDocumentUri = uri
+                        navController.navigate(Screen.Reader.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = false
+                            }
+                            launchSingleTop = true
+                            restoreState = false
+                        }
                     }
                 )
             }

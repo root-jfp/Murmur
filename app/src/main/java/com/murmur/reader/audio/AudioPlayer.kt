@@ -9,21 +9,29 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resume
 
 private const val TAG = "Murmur"
 
 /**
  * Wraps ExoPlayer for MP3 playback from Edge TTS audio chunks.
  *
- * ExoPlayer requires all calls to happen on the main thread.
- * Non-main-thread callers (e.g. Dispatchers.IO coroutines) must route
- * through [mainHandler] — all methods here do this internally.
+ * Chunk-based workflow:
+ *  1. [prepareForChunk] — reset the byte buffer
+ *  2. [appendChunk]     — called as binary frames arrive from the WebSocket
+ *  3. [playBuffer]      — flush buffer to temp file, start ExoPlayer, suspend until playing
+ *  4. [awaitCompletion] — suspend until ExoPlayer reaches STATE_ENDED
+ *
+ * [currentPositionMs] can be polled from any thread to drive word-boundary highlighting.
  */
 @Singleton
 class AudioPlayer @Inject constructor(
@@ -39,53 +47,161 @@ class AudioPlayer @Inject constructor(
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
-    /** Called before streaming begins for a new synthesis session. */
-    fun prepareForStreaming() {
-        chunkBuffer.reset()
-        mainHandler.post { releasePlayer() }
+    // Position polled on main thread, read from any thread for word-boundary sync
+    @Volatile
+    private var _cachedPositionMs: Long = 0L
+    private val positionPoller = object : Runnable {
+        override fun run() {
+            _cachedPositionMs = exoPlayer?.currentPosition ?: 0L
+            if (exoPlayer != null) {
+                mainHandler.postDelayed(this, 10) // ~100 Hz, stays ahead of 60 Hz consumers
+            }
+        }
     }
 
-    /** Appends an audio chunk received from Edge TTS. Thread-safe. */
+    /** Resets the byte buffer before synthesising a new text chunk. */
+    fun prepareForChunk() {
+        chunkBuffer.reset()
+    }
+
+    /** Appends raw MP3 bytes received from Edge TTS. Thread-safe. */
     fun appendChunk(chunk: com.murmur.reader.tts.AudioChunk) {
         synchronized(chunkBuffer) {
             chunkBuffer.write(chunk.bytes)
         }
-        Log.v(TAG, "AudioPlayer: buffered ${chunk.bytes.size} bytes (total=${chunkBuffer.size()})")
     }
 
     /**
-     * Called when Edge TTS signals turn.end — flush buffer to file and start playback.
-     * Safe to call from any thread.
+     * Flushes the buffered audio to a temp file, creates an ExoPlayer,
+     * and **suspends until playback actually starts** (or completes if the
+     * clip is very short).
+     *
+     * Returns `false` if there was nothing to play.
      */
-    fun finishStreaming() {
+    suspend fun playBuffer(): Boolean {
         val data = synchronized(chunkBuffer) { chunkBuffer.toByteArray() }
-        if (data.isEmpty()) return
+        if (data.isEmpty()) return false
 
-        // Write file off main thread, then switch to main for ExoPlayer
-        val file = File(context.cacheDir, "murmur_tts_${System.currentTimeMillis()}.mp3")
-        file.writeBytes(data)
-        Log.d(TAG, "AudioPlayer: writing ${data.size} bytes to ${file.name}")
+        val file = withContext(Dispatchers.IO) {
+            File(context.cacheDir, "murmur_tts_${System.currentTimeMillis()}.mp3").also {
+                it.writeBytes(data)
+            }
+        }
+        Log.d(TAG, "AudioPlayer: wrote ${data.size} bytes → ${file.name}")
 
-        mainHandler.post {
-            releasePlayer()
-            tempFile = file
+        suspendCancellableCoroutine { cont ->
+            mainHandler.post {
+                releasePlayer()
+                deleteTempFile()
+                tempFile = file
 
-            val player = ExoPlayer.Builder(context).build().also { exoPlayer = it }
-            player.addListener(object : Player.Listener {
-                override fun onIsPlayingChanged(playing: Boolean) {
-                    _isPlaying.value = playing
+                val player = ExoPlayer.Builder(context).build().also { exoPlayer = it }
+                player.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        _isPlaying.value = playing
+                        if (playing && cont.isActive) cont.resume(Unit)
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        // Clip may end before isPlaying ever flips to true
+                        if (playbackState == Player.STATE_ENDED && cont.isActive) {
+                            cont.resume(Unit)
+                        }
+                    }
+                })
+                player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+                player.prepare()
+                player.play()
+                startPositionPoller()
+                Log.d(TAG, "AudioPlayer: playback started")
+            }
+            cont.invokeOnCancellation {
+                mainHandler.post { releasePlayer(); deleteTempFile() }
+            }
+        }
+        return true
+    }
+
+    /**
+     * Plays an existing MP3 file directly via ExoPlayer.
+     * Does NOT delete the file when done (it's a cache file).
+     * Returns `false` if the file doesn't exist.
+     */
+    suspend fun playFile(file: File): Boolean {
+        if (!file.exists()) return false
+        Log.d(TAG, "AudioPlayer: playing cached file ${file.name}")
+
+        suspendCancellableCoroutine { cont ->
+            mainHandler.post {
+                releasePlayer()
+                // Don't delete temp files from previous buffer-based playback here —
+                // the cache file passed in is managed by AudioCacheRepository.
+                deleteTempFile()
+
+                val player = ExoPlayer.Builder(context).build().also { exoPlayer = it }
+                player.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        _isPlaying.value = playing
+                        if (playing && cont.isActive) cont.resume(Unit)
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_ENDED && cont.isActive) {
+                            cont.resume(Unit)
+                        }
+                    }
+                })
+                player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+                player.prepare()
+                player.play()
+                startPositionPoller()
+            }
+            cont.invokeOnCancellation {
+                mainHandler.post { releasePlayer() }
+            }
+        }
+        return true
+    }
+
+    /** Suspends until ExoPlayer reaches [Player.STATE_ENDED]. */
+    suspend fun awaitCompletion() {
+        suspendCancellableCoroutine { cont ->
+            mainHandler.post {
+                val player = exoPlayer
+                if (player == null ||
+                    player.playbackState == Player.STATE_ENDED ||
+                    player.playbackState == Player.STATE_IDLE
+                ) {
+                    if (cont.isActive) cont.resume(Unit)
+                    return@post
                 }
-            })
-            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
-            player.prepare()
-            player.play()
-            Log.d(TAG, "AudioPlayer: playback started")
+                val listener = object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_ENDED) {
+                            player.removeListener(this)
+                            if (cont.isActive) cont.resume(Unit)
+                        }
+                    }
+                }
+                player.addListener(listener)
+                cont.invokeOnCancellation {
+                    mainHandler.post { player.removeListener(listener) }
+                }
+            }
         }
     }
 
+    /**
+     * Current playback position in milliseconds.
+     * Safe to call from any thread — backed by a volatile field updated on the main thread.
+     */
+    fun currentPositionMs(): Long = _cachedPositionMs
+
+    fun seekTo(positionMs: Long) {
+        mainHandler.post { exoPlayer?.seekTo(positionMs) }
+    }
+
     fun pause() {
-        // Don't set _isPlaying eagerly — onIsPlayingChanged listener will update it
-        // once ExoPlayer has actually paused on the main thread.
         mainHandler.post { exoPlayer?.pause() }
     }
 
@@ -101,14 +217,20 @@ class AudioPlayer @Inject constructor(
         }
     }
 
-    fun currentPositionMs(): Long = exoPlayer?.currentPosition ?: 0L
+    // Must be called on main thread
+    private fun startPositionPoller() {
+        mainHandler.removeCallbacks(positionPoller)
+        positionPoller.run() // immediate first read + schedules next
+    }
 
     // Must be called on main thread
     private fun releasePlayer() {
+        mainHandler.removeCallbacks(positionPoller)
         exoPlayer?.stop()
         exoPlayer?.release()
         exoPlayer = null
         _isPlaying.value = false
+        _cachedPositionMs = 0L
     }
 
     private fun deleteTempFile() {

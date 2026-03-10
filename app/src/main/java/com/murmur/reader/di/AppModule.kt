@@ -3,6 +3,7 @@ package com.murmur.reader.di
 import android.content.Context
 import androidx.room.Room
 import com.murmur.reader.data.local.BookmarkDao
+import com.murmur.reader.data.local.CachedChunkDao
 import com.murmur.reader.data.local.MurmurDatabase
 import com.murmur.reader.data.local.ReadingProgressDao
 import dagger.Module
@@ -36,7 +37,8 @@ object AppModule {
             context,
             MurmurDatabase::class.java,
             "murmur.db"
-        ).build()
+        ).addMigrations(MurmurDatabase.MIGRATION_1_2)
+            .build()
     }
 
     @Provides
@@ -44,4 +46,7 @@ object AppModule {
 
     @Provides
     fun provideBookmarkDao(db: MurmurDatabase): BookmarkDao = db.bookmarkDao()
+
+    @Provides
+    fun provideCachedChunkDao(db: MurmurDatabase): CachedChunkDao = db.cachedChunkDao()
 }

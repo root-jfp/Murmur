@@ -6,11 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.murmur.reader.data.local.ReadingProgressDao
 import com.murmur.reader.data.local.ReadingProgressEntity
 import com.murmur.reader.data.preferences.UserPreferencesRepository
+import android.util.Log
 import com.murmur.reader.document.DocumentParser
 import com.murmur.reader.document.EpubParser
 import com.murmur.reader.document.HtmlParser
 import com.murmur.reader.document.PdfParser
 import com.murmur.reader.document.PlainTextParser
+import com.murmur.reader.document.TextChunker
 import com.murmur.reader.tts.TtsManager
 import com.murmur.reader.tts.TtsState
 import com.murmur.reader.tts.VoiceRepository
@@ -45,6 +47,7 @@ class ReaderViewModel @Inject constructor(
     private val prefsRepository: UserPreferencesRepository,
     private val progressDao: ReadingProgressDao,
     private val textSanitizer: TextSanitizer,
+    private val textChunker: TextChunker,
     private val pdfParser: PdfParser,
     private val htmlParser: HtmlParser,
     private val plainTextParser: PlainTextParser,
@@ -67,6 +70,9 @@ class ReaderViewModel @Inject constructor(
     // Sequential counter — each boundary from TTS corresponds to the next word in order.
     // No text-matching needed; TTS delivers boundaries in the exact sequence they appear.
     private var wordBoundaryCount = 0
+
+    // Debounce for playFromWordIndex — ignore calls within 300ms
+    private var lastPlayFromWordMs = 0L
 
     init {
         // Advance the highlight index for every word boundary received
@@ -136,7 +142,7 @@ class ReaderViewModel @Inject constructor(
         if (text.isBlank()) return
         wordBoundaryCount = 0
         _uiState.value = _uiState.value.copy(currentWordIndex = -1)
-        ttsManager.speak(text)
+        ttsManager.speak(text, _uiState.value.documentUri?.toString())
     }
 
     fun pause() = ttsManager.pause()
@@ -147,6 +153,13 @@ class ReaderViewModel @Inject constructor(
         ttsManager.stop()
         _uiState.value = _uiState.value.copy(currentWordIndex = -1)
         saveProgress()
+    }
+
+    fun clearDocument() {
+        ttsManager.stop()
+        saveProgress()
+        _uiState.value = ReaderUiState()
+        wordBoundaryCount = 0
     }
 
     fun onPageChange(page: Int, total: Int) {
@@ -169,6 +182,59 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             prefsRepository.setPitch(hz)
         }
+    }
+
+    fun setFontSize(size: Float) {
+        viewModelScope.launch {
+            prefsRepository.setFontSize(size)
+        }
+    }
+
+    /**
+     * Jumps TTS playback to the word at [globalWordIndex].
+     * Maps the global word index to a chunk index + word offset within that chunk,
+     * using the same whitespace split as BookPager for consistency.
+     */
+    fun playFromWordIndex(globalWordIndex: Int) {
+        val now = System.currentTimeMillis()
+        if (now - lastPlayFromWordMs < 300) return // debounce
+        lastPlayFromWordMs = now
+
+        val text = _uiState.value.text
+        if (text.isBlank()) return
+
+        // Find the character offset of the target word in the full text
+        val wordRegex = Regex("\\S+")
+        val allWords = wordRegex.findAll(text).toList()
+        if (globalWordIndex < 0 || globalWordIndex >= allWords.size) return
+        val targetCharOffset = allWords[globalWordIndex].range.first
+
+        // Count words per chunk to find which chunk contains the target word,
+        // and compute the character offset of the word within that chunk.
+        val chunks = textChunker.chunk(text)
+        var wordsBeforeChunk = 0
+        var startChunkIndex = 0
+        var charOffsetInChunk = 0
+
+        for ((idx, chunk) in chunks.withIndex()) {
+            val chunkWords = wordRegex.findAll(chunk).toList()
+            val wordsInChunk = chunkWords.size
+            if (wordsBeforeChunk + wordsInChunk > globalWordIndex || idx == chunks.lastIndex) {
+                startChunkIndex = idx
+                val wordIdxInChunk = (globalWordIndex - wordsBeforeChunk).coerceIn(0, chunkWords.lastIndex)
+                charOffsetInChunk = chunkWords[wordIdxInChunk].range.first
+                break
+            }
+            wordsBeforeChunk += wordsInChunk
+        }
+
+        Log.d("Murmur", "playFromWordIndex: global=$globalWordIndex → chunk=$startChunkIndex, charOffset=$charOffsetInChunk")
+
+        // Update counters so highlighting starts from the tapped word
+        wordBoundaryCount = globalWordIndex
+        _uiState.value = _uiState.value.copy(currentWordIndex = globalWordIndex)
+
+        ttsManager.speak(text, _uiState.value.documentUri?.toString(), startChunkIndex, charOffsetInChunk)
     }
 
     private fun saveProgress() {

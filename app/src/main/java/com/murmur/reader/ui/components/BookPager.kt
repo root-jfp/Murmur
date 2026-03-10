@@ -1,13 +1,11 @@
 package com.murmur.reader.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,20 +15,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
@@ -46,7 +50,7 @@ import com.murmur.reader.ui.theme.MurmurHighlight
 import com.murmur.reader.ui.theme.MurmurHighlightOnDark
 import kotlinx.coroutines.launch
 
-private const val PAGE_MARGIN_DP = 28
+private const val PAGE_MARGIN_DP = 10
 
 private data class PageData(
     val text: String,
@@ -157,6 +161,7 @@ fun BookPager(
     isDark: Boolean,
     initialPage: Int,
     onPageChange: (page: Int, total: Int) -> Unit,
+    onWordTapped: (globalWordIndex: Int) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -177,7 +182,7 @@ fun BookPager(
             val localDensity = LocalDensity.current
 
             val marginPx = with(localDensity) { PAGE_MARGIN_DP.dp.roundToPx() }
-            val pageIndicatorPx = with(localDensity) { 36.dp.roundToPx() }
+            val pageIndicatorPx = with(localDensity) { 24.dp.roundToPx() }
 
             val contentWidthPx = (pageWidthPx - marginPx * 2).coerceAtLeast(1)
             val contentHeightPx = (pageHeightPx - marginPx * 2 - pageIndicatorPx).coerceAtLeast(1)
@@ -185,8 +190,9 @@ fun BookPager(
             val textStyle = TextStyle(
                 fontFamily = fontFamily,
                 fontSize = fontSize,
-                lineHeight = (fontSize.value * 1.58f).sp,
+                lineHeight = (fontSize.value * 1.5f).sp,
                 color = textColor,
+                textIndent = TextIndent(firstLine = 24.sp),
             )
 
             val pages = remember(text, fontSize.value, contentWidthPx, contentHeightPx, useSerifFont) {
@@ -249,6 +255,7 @@ fun BookPager(
                                 pagerState.animateScrollToPage(pagerState.currentPage + 1)
                         }
                     },
+                    onWordTapped = { globalIdx -> onWordTapped(globalIdx) },
                 )
             }
         }
@@ -268,6 +275,7 @@ private fun BookPage(
     marginDp: Dp,
     onTapLeft: () -> Unit,
     onTapRight: () -> Unit,
+    onWordTapped: (globalWordIndex: Int) -> Unit = {},
 ) {
     val vignetteColor = if (isDark) Color.Black else Color(0xFF3C2A14)
 
@@ -277,7 +285,6 @@ private fun BookPage(
             .background(backgroundColor)
             .drawWithContent {
                 drawContent()
-                // Radial vignette — page edges are slightly darker, like a real book page
                 drawRect(
                     brush = Brush.radialGradient(
                         colors = listOf(Color.Transparent, vignetteColor.copy(alpha = 0.07f)),
@@ -285,7 +292,6 @@ private fun BookPage(
                         radius = size.width * 0.88f,
                     )
                 )
-                // Left-edge shadow (book spine side)
                 drawRect(
                     brush = Brush.horizontalGradient(
                         colors = listOf(vignetteColor.copy(alpha = 0.10f), Color.Transparent),
@@ -293,7 +299,6 @@ private fun BookPage(
                         endX = size.width * 0.055f,
                     )
                 )
-                // Right-edge shadow
                 drawRect(
                     brush = Brush.horizontalGradient(
                         colors = listOf(Color.Transparent, vignetteColor.copy(alpha = 0.07f)),
@@ -303,7 +308,6 @@ private fun BookPage(
                 )
             }
     ) {
-        // Text content and page indicator
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -312,8 +316,12 @@ private fun BookPage(
             PageText(
                 text = page.text,
                 localWordIndex = localWordIndex,
+                startWordCount = page.startWordCount,
                 textStyle = textStyle,
                 highlightColor = highlightColor,
+                onWordTapped = onWordTapped,
+                onTapLeft = onTapLeft,
+                onTapRight = onTapRight,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -328,33 +336,6 @@ private fun BookPage(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
         }
-
-        // Tap zones — transparent overlays on left and right thirds
-        // clickable only fires on confirmed tap (no drag), so swipe still works
-        Row(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(1f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onTapLeft,
-                    )
-            )
-            // Middle third: free for natural swipe gesture
-            Spacer(modifier = Modifier.fillMaxHeight().weight(1f))
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(1f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onTapRight,
-                    )
-            )
-        }
     }
 }
 
@@ -362,11 +343,16 @@ private fun BookPage(
 private fun PageText(
     text: String,
     localWordIndex: Int,
+    startWordCount: Int,
     textStyle: TextStyle,
     highlightColor: Color,
+    onWordTapped: (globalWordIndex: Int) -> Unit,
+    onTapLeft: () -> Unit,
+    onTapRight: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = remember(text) { text.split(Regex("(?<=\\s)|(?=\\s)")) }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     var wordIdx = 0
     val annotated = buildAnnotatedString {
@@ -389,6 +375,51 @@ private fun PageText(
     Text(
         text = annotated,
         style = textStyle,
-        modifier = modifier,
+        onTextLayout = { layoutResult = it },
+        modifier = modifier.pointerInput(startWordCount) {
+            awaitEachGesture {
+                // requireUnconsumed = false so we receive events even when
+                // HorizontalPager's scrollable consumes the initial down
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val downPos = down.position // capture where finger first touched
+                val up = waitForUpOrCancellation()
+                if (up == null) return@awaitEachGesture // drag/swipe — let pager handle it
+
+                val tapOffset = downPos // use down position for accurate word targeting
+                val layout = layoutResult
+                if (layout == null) {
+                    val third = size.width / 3f
+                    if (tapOffset.x < third) onTapLeft()
+                    else if (tapOffset.x > third * 2) onTapRight()
+                    return@awaitEachGesture
+                }
+
+                val charOffset = layout.getOffsetForPosition(tapOffset)
+
+                // Map char offset → local word index
+                var charPos = 0
+                var wIdx = 0
+                var tappedWord = false
+                for (token in tokens) {
+                    val tokenEnd = charPos + token.length
+                    val isSpace = token.isBlank()
+                    if (charOffset in charPos until tokenEnd) {
+                        if (isSpace) break // tapped whitespace → page turn
+                        up.consume()
+                        onWordTapped(startWordCount + wIdx)
+                        tappedWord = true
+                        break
+                    }
+                    charPos = tokenEnd
+                    if (!isSpace) wIdx++
+                }
+
+                if (!tappedWord) {
+                    val third = size.width / 3f
+                    if (tapOffset.x < third) onTapLeft()
+                    else if (tapOffset.x > third * 2) onTapRight()
+                }
+            }
+        },
     )
 }

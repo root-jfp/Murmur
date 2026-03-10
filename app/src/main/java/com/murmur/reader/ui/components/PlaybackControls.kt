@@ -35,16 +35,18 @@ fun PlaybackControls(
     onSkipNext: () -> Unit,
     onSkipPrev: () -> Unit,
     modifier: Modifier = Modifier,
+    leadingAction: @Composable (() -> Unit)? = null,
 ) {
     Surface(
         tonalElevation = 4.dp,
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // State label
+            // State label — left-aligned, takes remaining space
             val stateLabel = when (state) {
                 is TtsState.Idle -> stringResource(R.string.state_idle)
                 is TtsState.Connecting -> stringResource(R.string.state_connecting)
@@ -57,58 +59,57 @@ fun PlaybackControls(
                 is TtsState.Paused -> stringResource(R.string.state_paused)
                 is TtsState.Error -> stringResource(R.string.state_error, state.message)
             }
+            if (leadingAction != null) {
+                leadingAction()
+            }
+
             Text(
                 text = stateLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp)
+                modifier = Modifier.weight(1f).padding(start = if (leadingAction != null) 0.dp else 8.dp),
             )
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
+            // Skip back
+            IconButton(onClick = onSkipPrev, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Filled.SkipPrevious,
+                    contentDescription = stringResource(R.string.action_skip_prev),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Stop
+            IconButton(onClick = onStop, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Filled.Stop,
+                    contentDescription = stringResource(R.string.action_stop),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Play / Pause (main button)
+            FilledIconButton(
+                onClick = if (state is TtsState.Playing) onPause else onPlay,
+                modifier = Modifier.size(44.dp)
             ) {
-                // Skip back
-                IconButton(onClick = onSkipPrev) {
-                    Icon(
-                        Icons.Filled.SkipPrevious,
-                        contentDescription = stringResource(R.string.action_skip_prev),
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
+                Icon(
+                    imageVector = if (state is TtsState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (state is TtsState.Playing)
+                        stringResource(R.string.action_pause)
+                    else
+                        stringResource(R.string.action_play),
+                    modifier = Modifier.size(26.dp)
+                )
+            }
 
-                // Stop
-                IconButton(onClick = onStop) {
-                    Icon(
-                        Icons.Filled.Stop,
-                        contentDescription = stringResource(R.string.action_stop),
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-
-                // Play / Pause (main button)
-                FilledIconButton(
-                    onClick = if (state is TtsState.Playing) onPause else onPlay,
-                    modifier = Modifier.size(56.dp)
-                ) {
-                    Icon(
-                        imageVector = if (state is TtsState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (state is TtsState.Playing)
-                            stringResource(R.string.action_pause)
-                        else
-                            stringResource(R.string.action_play),
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-
-                // Skip forward
-                IconButton(onClick = onSkipNext) {
-                    Icon(
-                        Icons.Filled.SkipNext,
-                        contentDescription = stringResource(R.string.action_skip_next),
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
+            // Skip forward
+            IconButton(onClick = onSkipNext, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Filled.SkipNext,
+                    contentDescription = stringResource(R.string.action_skip_next),
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }

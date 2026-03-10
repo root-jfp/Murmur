@@ -4,6 +4,8 @@ import android.util.Log
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -82,6 +84,7 @@ class EdgeTtsClient @Inject constructor(
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val synthMutex = Mutex()
 
     /** Events emitted during synthesis */
     sealed interface SynthesisEvent {
@@ -103,51 +106,53 @@ class EdgeTtsClient @Inject constructor(
      * The connection is established lazily on the first call and reused thereafter.
      */
     fun synthesize(request: SynthesisRequest): Flow<SynthesisEvent> = flow {
-        val channel = Channel<SynthesisEvent>(Channel.UNLIMITED)
-        eventChannel = channel
+        synthMutex.withLock {
+            val channel = Channel<SynthesisEvent>(Channel.UNLIMITED)
+            eventChannel = channel
 
-        // Connect if not already connected
-        if (webSocket == null) {
-            Log.d(TAG, "EdgeTtsClient: opening new WebSocket connection")
-            // ConnectionId and Sec-MS-GEC go in the URL query string (not headers)
-            // per the edge-tts Python reference implementation (communicate.py)
-            val connectionId = UUID.randomUUID().toString().replace("-", "")
-            val secMsGec = generateSecMsGec()
-            val muid = generateMuid()
-            val wsUrl = "$EDGE_TTS_URL_BASE" +
-                "&ConnectionId=$connectionId" +
-                "&Sec-MS-GEC=$secMsGec" +
-                "&Sec-MS-GEC-Version=$SEC_MS_GEC_VERSION"
-            val wsRequest = Request.Builder()
-                .url(wsUrl)
-                .header("Pragma", "no-cache")
-                .header("Cache-Control", "no-cache")
-                .header("Origin", ORIGIN)
-                .header("User-Agent", USER_AGENT)
-                .header("Accept-Encoding", "gzip, deflate, br, zstd")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Sec-WebSocket-Version", "13")
-                .header("Cookie", "muid=$muid;")
-                .build()
-            Log.d(TAG, "EdgeTtsClient: connectionId=$connectionId Sec-MS-GEC=$secMsGec")
+            // Connect if not already connected
+            if (webSocket == null) {
+                Log.d(TAG, "EdgeTtsClient: opening new WebSocket connection")
+                // ConnectionId and Sec-MS-GEC go in the URL query string (not headers)
+                // per the edge-tts Python reference implementation (communicate.py)
+                val connectionId = UUID.randomUUID().toString().replace("-", "")
+                val secMsGec = generateSecMsGec()
+                val muid = generateMuid()
+                val wsUrl = "$EDGE_TTS_URL_BASE" +
+                    "&ConnectionId=$connectionId" +
+                    "&Sec-MS-GEC=$secMsGec" +
+                    "&Sec-MS-GEC-Version=$SEC_MS_GEC_VERSION"
+                val wsRequest = Request.Builder()
+                    .url(wsUrl)
+                    .header("Pragma", "no-cache")
+                    .header("Cache-Control", "no-cache")
+                    .header("Origin", ORIGIN)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept-Encoding", "gzip, deflate, br, zstd")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Sec-WebSocket-Version", "13")
+                    .header("Cookie", "muid=$muid;")
+                    .build()
+                Log.d(TAG, "EdgeTtsClient: connectionId=$connectionId Sec-MS-GEC=$secMsGec")
 
-            webSocket = okHttpClient.newWebSocket(wsRequest, createListener())
-        }
+                webSocket = okHttpClient.newWebSocket(wsRequest, createListener())
+            }
 
-        // Send speech.config first (required before each session of synthesis)
-        val configMsg = EdgeTtsProtocol.buildSpeechConfig()
-        webSocket?.send(configMsg)
-        Log.d(TAG, "EdgeTtsClient: sent speech.config")
+            // Send speech.config first (required before each session of synthesis)
+            val configMsg = EdgeTtsProtocol.buildSpeechConfig()
+            webSocket?.send(configMsg)
+            Log.d(TAG, "EdgeTtsClient: sent speech.config")
 
-        // Send SSML request
-        val ssmlMsg = EdgeTtsProtocol.buildSsmlRequest(request)
-        webSocket?.send(ssmlMsg)
-        Log.d(TAG, "EdgeTtsClient: sent SSML for voice=${request.voiceName}, textLen=${request.text.length}")
+            // Send SSML request
+            val ssmlMsg = EdgeTtsProtocol.buildSsmlRequest(request)
+            webSocket?.send(ssmlMsg)
+            Log.d(TAG, "EdgeTtsClient: sent SSML for voice=${request.voiceName}, textLen=${request.text.length}")
 
-        // Collect events until turn.end or error
-        for (event in channel) {
-            emit(event)
-            if (event is SynthesisEvent.TurnEnd || event is SynthesisEvent.Error) break
+            // Collect events until turn.end or error
+            for (event in channel) {
+                emit(event)
+                if (event is SynthesisEvent.TurnEnd || event is SynthesisEvent.Error) break
+            }
         }
     }
 
